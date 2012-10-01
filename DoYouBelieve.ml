@@ -188,7 +188,7 @@ let play_game state players =
 	and do_move state move =
 		let hand = (List.nth state.hands state.active_hand) in
 		match state.claim, move with
-		| None, New_move (cards, claim) -> 
+		| None, New_move (cards, claim) | Some claim, Adding_move(cards) -> 
 			let hand, table, is_ok = hand_cards_to_table hand cards state.table in					
 			if is_ok then 
 				let finished = 
@@ -208,34 +208,10 @@ let play_game state players =
 									table = table; 
 									claim = if finished then None else Some claim;
 									active_hand = if finished then next_hand_num (next_hand_num state.active_hand state.hands) state.hands
-													else next_hand_num state.active_hand state.hands;
+												  else next_hand_num state.active_hand state.hands;
 									finished_hands = if finished then state.active_hand :: state.finished_hands 
 													 else state.finished_hands}
 			else failwith "do_move: You haven't all these cards"
-		| Some claim, Adding_move(cards) ->
-			let hand, table, is_ok = hand_cards_to_table hand cards state.table in
-			if is_ok then 
-				let finished = 
-					if hand = [] then (* player's last move *)
-						if List.for_all (fun (rank, suit) -> rank = claim) (List.hd table) then true
-						else failwith "do_move: you cannot lie in your last move"
-					else false
-				in
-				let hands = list_replace_nth state.hands state.active_hand hand in
-				let hands = if finished then 
-								let hand_num = next_hand_num state.active_hand state.hands in
-								let hand = List.nth state.hands hand_num in
-								list_replace_nth hands hand_num (hand @ List.concat table)
-							else hands
-				in	
-				{state with hands =  hands; 
-									 table = table;
-									 claim = if finished then None else Some claim;
-									 active_hand = if finished then next_hand_num (next_hand_num state.active_hand state.hands) state.hands
-													 else next_hand_num state.active_hand state.hands;
-									 finished_hands = if finished then state.active_hand :: state.finished_hands 
-													   else state.finished_hands}
-			else state
 		| Some claim, Check -> 
 			if List.for_all (fun (rank, suit) -> rank = claim) (List.hd state.table) then
 				{state with hands = list_replace_nth state.hands state.active_hand (hand @ List.concat state.table);
