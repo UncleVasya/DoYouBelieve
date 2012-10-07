@@ -298,7 +298,7 @@ let play_game state players =
 				^ 
 				match finished, move with
 				| true, _ -> 
-					sprintf "ends with %s" (string_of_card_list cards)
+					sprintf "ends with %s\n" (string_of_card_list cards)
 					^ 
 					let next_player = List.nth players (next_hand_num state.active_hand hands) in
 					sprintf "%s (%s) takes table." next_player.name (string_of_player_nature next_player.nature) 
