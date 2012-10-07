@@ -200,7 +200,7 @@ let play_game state players =
 		let cards = cards_by_priority hand in
 		let aces, normal_cards = List.partition (fun (rank,suit) -> rank = Ace) cards in
 		
-		if not_empty normal_cards & can_finish normal_cards claim then finish normal_cards claim
+		if not (is_empty normal_cards) & can_finish normal_cards claim then finish normal_cards claim
 		else
 			let pick_cards cards claim say_truth =
 				if say_truth then 
