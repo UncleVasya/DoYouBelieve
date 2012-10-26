@@ -52,21 +52,21 @@ let string_of_player_nature = function Human -> "Human" | Computer -> "Computer"
 let state_show state =
 	printf "\n\n------STATE START------\n\n";
 	printf "Hands: \n\n";
-	ignore(List.fold_left (fun s x -> printf "%d.  %s \n" s (string_of_card_list x); s+1) 0 state.hands);
+	ignore(List.fold_left (fun s x -> printf "%d.  %s \n" s (string_of_card_list x); s+1) 1 state.hands);
 	
 	printf "\nTable:  ";
 	List.iter (fun x -> printf "[ %s ]  " (string_of_card_list x)) state.table;
 	
 	printf "\n\nClaim: %s" (match state.claim with None -> "None" | Some c -> string_of_card_rank c);
-	printf "\nActive hand: %d" state.active_hand;
+	printf "\nActive hand: %d" (state.active_hand + 1);
 	
 	printf "\n\nFinished_hands: "; 
-	printf " [ %s ] \n" (List.fold_left (fun s x -> s ^ "  " ^ string_of_int x) "" state.finished_hands);
+	printf " [ %s ] \n" (List.fold_left (fun s x -> s ^ "  " ^ string_of_int (x+1)) "" state.finished_hands);
 	printf "\n\n------STATE END------\n\n"
 
 let get_players =
 	[
-		{name = "Player 1"; nature = Human};
+		{name = "Player 1"; nature = Computer};
 		{name = "Player 2"; nature = Computer};
 		{name = "Player 3"; nature = Computer};
 		{name = "Player 4"; nature = Computer}
@@ -112,7 +112,7 @@ let divide_list lst n =
 	in divide_list [] lst
 
 	
-(* TODO: sometimes 4 cards of the same rank may be in on hand. Check for this and shuffle again if needed *)
+(* TODO: sometimes 4 cards of the same rank may appear in one hand. Check for this and shuffle again if needed *)
 let create_state player_count = 
 	let ranks = [Six; Seven; Eight; Nine; Ten; Jack; Queen; King; Ace] in
 	let suits = [Heart; Club; Spade; Diamond] in
@@ -122,7 +122,7 @@ let create_state player_count =
 	
 let play_game state players =	
 	let rec play_game state =
-		(* state_show state; *)
+		state_show state;
 		if end_game state then List.rev state.finished_hands
 		else 
 			let new_state = 
@@ -131,13 +131,15 @@ let play_game state players =
 					let new_state, move_log = do_move state move in
 					printf "\n%s" move_log;
 					new_state
-				with Failure s -> printf "\n%s \n\n" s; 
-					 state
+				with Failure s ->
+						printf "\n%s \n\n" s; 
+						state
 			in play_game new_state
 	
 	and end_game state = 
-		let hands_in_game = List.fold_left (fun s x -> if x = [] then s else s+1) 0 state.hands in
-		hands_in_game < 2
+		List.length state.hands - List.length state.finished_hands < 2
+		or 
+		List.for_all (fun (rank,_) -> rank = Ace) (List.concat state.hands @ List.concat state.table)
 	
 	and info_to_player state = 
 		(* HINT: You can rewrite it to not tail-recursive. That's ok.*)
@@ -200,17 +202,17 @@ let play_game state players =
 		let cards = cards_by_priority hand in
 		let aces, normal_cards = List.partition (fun (rank,suit) -> rank = Ace) cards in
 		
-		if not (is_empty normal_cards) & can_finish normal_cards claim then finish normal_cards claim
+		if is_empty aces & can_finish normal_cards claim then finish normal_cards claim
 		else
 			let pick_cards cards claim say_truth =
 				if say_truth then 
 					let cards = List.filter (fun (rank,suit) -> rank = claim) cards in
 					let num = 1 + Random.int (List.length cards) in
-					let cards,_ = list_split cards num in 
+					let cards, _ = list_split cards num in 
 					cards
 				else
 					let num = 1 + Random.int 3 in
-					let cards,_ = list_split cards num in 
+					let cards, _ = list_split cards num in 
 					cards
 			in
 			match claim with 
@@ -220,24 +222,27 @@ let play_game state players =
 					| (rank,_)::_ -> rank
 				in
 				let chance_of_truth = 60 - 6 * List.length aces in
-				if rnd < chance_of_truth then New_move (pick_cards normal_cards claim truth, claim)
-				else New_move (pick_cards (aces @ normal_cards) claim lie, claim)
+				let can_say_truth = not (is_empty normal_cards) in
+				if can_say_truth & rnd < chance_of_truth 
+					then New_move (pick_cards normal_cards claim truth, claim)
+					else New_move (pick_cards (aces @ normal_cards) claim lie, claim)
 			| Some claim ->
 				let claim_cards = List.filter (fun (rank,suit) -> rank = claim) normal_cards in
 				let prev_move = List.hd prev_moves in
 				let prev_move_possible = prev_move <= 4 - List.length claim_cards in 
+				let check_or_lose = List.fold_left (fun s x -> if x = 0 then s else s+1) 0 hand_sizes < 2 in
 					
-				if not prev_move_possible then Check
+				if not prev_move_possible or check_or_lose then Check
 				else
 					let can_say_truth = List.exists (fun (rank,suit) -> rank = claim) normal_cards in
 					if can_say_truth then 
 						(* 10% check, 70% truth, 20% lie *)
 						if rnd < 10 then Check 
-						else if rnd > 30 then Adding_move (pick_cards cards claim truth) 
-						else Adding_move (pick_cards cards claim lie)
+						else if rnd > 30 then Adding_move (pick_cards normal_cards claim truth) 
+						else Adding_move (pick_cards (aces @ normal_cards) claim lie)
 					else 
 						(* 60% check, 40% lie *)
-						if rnd < 60 then Check else Adding_move (pick_cards cards claim lie)
+						if rnd < 60 then Check else Adding_move (pick_cards (aces @ normal_cards) claim lie)
 			
 		and can_finish hand claim = match claim, hand with
 		| None, (claim,_)::_ | Some claim, _ -> check_cards claim hand
@@ -271,24 +276,16 @@ let play_game state players =
 		| _, New_move (_, Ace) ->  failwith "do_move: Ace cannot be a claim."
 		| None, New_move (cards, claim) | Some claim, Adding_move(cards) ->
 			let hand, table = hand_cards_to_table hand cards state.table in			
-			let finished = hand_finished hand cards claim in
-			let hands =
-				let hands = list_replace_nth state.hands state.active_hand hand in
-				if finished then
-					let next_hand_num = next_hand_num state.active_hand state.hands in
-					let next_hand = List.nth state.hands next_hand_num in
-					let next_hand = table_to_hand table next_hand in
-					list_replace_nth hands next_hand_num next_hand
-				else hands
-			in
-			let new_state =
+			let hands = list_replace_nth state.hands state.active_hand hand in
+			let prev_hand_n = prev_hand_num state.active_hand state.finished_hands in
+			let prev_hand = List.nth state.hands prev_hand_n in
+			let new_state = 
 				{
-					hands = hands; 
-					table = if finished then [] else table;
-					claim = if finished then None else Some claim;
-					active_hand = if finished then next_hand_num (next_hand_num state.active_hand state.hands) state.hands
-								  else next_hand_num state.active_hand state.hands;
-					finished_hands = if finished then state.active_hand :: state.finished_hands 
+					hands = hands;
+					table = table;
+					claim = Some claim;
+					active_hand = next_hand_num state.active_hand state.finished_hands;
+					finished_hands = if is_empty prev_hand then prev_hand_n :: state.finished_hands 
 									 else state.finished_hands
 				}
 			in
@@ -296,51 +293,62 @@ let play_game state players =
 				let player = List.nth players state.active_hand in
 				sprintf "%s (%s):  " player.name (string_of_player_nature player.nature)
 				^ 
-				match finished, move with
-				| true, _ -> 
-					sprintf "ends with %s\n" (string_of_card_list cards)
-					^ 
-					let next_player = List.nth players (next_hand_num state.active_hand hands) in
-					sprintf "%s (%s) takes table." next_player.name (string_of_player_nature next_player.nature) 
-				| _, New_move (cards, claim) -> sprintf "%d cards of rank %s" (List.length cards) (string_of_card_rank claim)
-				| _, Adding_move (cards) -> sprintf "%d more of rank %s" (List.length cards) (string_of_card_rank claim)
+				match move with
+				| New_move (cards, claim) -> sprintf "%d cards of rank %s" (List.length cards) (string_of_card_rank claim)
+				| Adding_move (cards) -> sprintf "%d more of rank %s" (List.length cards) (string_of_card_rank claim)
+				^
+				if is_empty prev_hand then
+					let prev_player = List.nth players prev_hand_n in
+					sprintf "\n%s (%s) has no more cards. HE FINISHED.\n\n" 
+							prev_player.name 
+							(string_of_player_nature prev_player.nature)
+				else ""
 			in new_state, move_log
+		
 		| Some claim, Check -> 
 			let check_passed = check_cards claim (List.hd state.table) in
-			let new_state = 
+			
+			let prev_hand_n = prev_hand_num state.active_hand state.finished_hands in
+			let prev_hand = List.nth state.hands prev_hand_n in
+			let prev_hand = if check_passed then prev_hand else table_to_hand state.table prev_hand in
+			let new_state =
 				if check_passed then
 					{state with hands = list_replace_nth state.hands state.active_hand (table_to_hand state.table hand);
-								active_hand = next_hand_num state.active_hand state.hands;
+								active_hand = next_hand_num state.active_hand state.finished_hands;
 								table = [];
+								finished_hands = if is_empty prev_hand then prev_hand_n :: state.finished_hands 
+												 else state.finished_hands;
 								claim = None}
 				else 
-					let hand_num = prev_hand_num state.active_hand state.hands in
-					let hand = List.nth state.hands hand_num in
-						{state with hands = list_replace_nth state.hands hand_num (table_to_hand state.table hand);
-									table = [];
-									claim = None}
+					{state with hands = list_replace_nth state.hands prev_hand_n prev_hand;
+								table = [];
+								finished_hands = if is_empty prev_hand then prev_hand_n :: state.finished_hands 
+												 else state.finished_hands;
+								claim = None}
 			in
 			let move_log =
 				let player = List.nth players state.active_hand in
-				let prev_player = List.nth players (prev_hand_num state.active_hand state.hands) in
+				let prev_player = List.nth players prev_hand_n in
 				sprintf "%s (%s) checks cards of %s (%s) \n" 
 						player.name (string_of_player_nature player.nature)  
 						prev_player.name (string_of_player_nature prev_player.nature) 
 				^ 
-				sprintf "Cards: %s   Claim: %s. \n%s (%s) said %s. \n%s takes table." 
+				sprintf "Cards: %s   Claim: %s. \n%s (%s) said %s. \n%s takes table.\n\n" 
 						(string_of_card_list (List.hd state.table))
 						(string_of_card_rank claim)											
 						prev_player.name 
 						(string_of_player_nature prev_player.nature)  
 						(if check_passed then "truth" else "a lie")
 						(if check_passed then player.name else prev_player.name)
+				^
+				if is_empty prev_hand then
+					let prev_player = List.nth players prev_hand_n in
+					sprintf "%s (%s) has no more cards. HE FINISHED.\n\n" 
+							prev_player.name 
+							(string_of_player_nature prev_player.nature)
+				else ""
 			in new_state, move_log	
 		| _,_ -> failwith "do_move: Invalid move"
-		
-		and hand_finished hand moved_cards claim = match is_empty hand, check_cards claim moved_cards with
-			| true, true -> true
-			| true, false -> failwith "hand_finished: you cannot lie in your last move"
-			| _ -> false
 		
 		and is_empty = function [] -> true | _ -> false
 		and check_cards claim = List.for_all (fun (rank, suit) -> rank = claim) 
@@ -367,30 +375,21 @@ let play_game state players =
 			| h::t -> if n = 0 then (List.rev acc) @ (item::t) else list_replace_nth (h::acc) (n-1) t
 			in list_replace_nth [] n lst
 	
-		(* TODO: optimize, add some checks *)
-		and next_hand_num n = function 
-			| [] -> failwith "next_hand_num"
-			| hands ->
-				let next_n = if n = (List.length hands) - 1 then 0 else n + 1 in
-				if List.nth hands next_n = [] then next_hand_num next_n hands else next_n
+		(* TODO: add some checks *)
+		and next_hand_num n finished_hands =
+			let next_n = if n = (List.length state.hands) - 1 then 0 else n + 1 in
+			if List.mem next_n finished_hands then next_hand_num next_n finished_hands else next_n
 	
-		(* TODO: optimize, add some checks *)	
-		and prev_hand_num n = function
-			| [] -> failwith "prev_hand_num"
-			| hands ->
-				let prev_n = if n = 0 then (List.length hands) - 1 else n - 1 in
-				if List.nth hands prev_n = [] then prev_hand_num prev_n hands else prev_n
-				
-		(* HINT: has no use now, can be deleted *)
-		(* and print_strings lst = printf "\n\n"; List.iter (printf "%s \n") lst; printf "\n\n"; *)
+		(* TODO: add some checks *)	
+		and prev_hand_num n finished_hands =
+			let prev_n = if n = 0 then (List.length state.hands) - 1 else n - 1 in
+			if List.mem prev_n finished_hands then prev_hand_num prev_n finished_hands else prev_n
 
 	in play_game state
 ;;
 
-(* #trace play_game;; *)
-
 let main  =
-	(* Random.self_init(); *)
+	Random.self_init();
 	let players = get_players in
 	let player_count = List.length players in
 	let state = create_state player_count in
