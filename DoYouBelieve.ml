@@ -1,6 +1,6 @@
 (* #load "str.cma";; *)  (* regexp *)
 open Unix;; (* time detection *)
-open Printf;;  
+open Printf;;
 
 type card = card_rank * card_suit
 and card_rank = Six | Seven | Eight | Nine | Ten | Jack | Queen | King | Ace
@@ -8,11 +8,11 @@ and card_suit = Heart | Club | Spade | Diamond;;
 
 type gameState =
 {
-	hands : card list list;
-	table : card list list;
-	claim : card_rank option;
-	active_hand : int;
-	finished_hands : int list;
+	mutable hands : card list list;
+	mutable table : card list list;
+	mutable claim : card_rank option;
+	mutable active_hand : int;
+	mutable finished_hands : int list;
 };;
 
 type move = Check | New_move of card list * card_rank | Adding_move of card list;;
@@ -122,7 +122,7 @@ let create_state player_count =
 	
 let play_game state players =	
 	let rec play_game state =
-		state_show state;
+		(* state_show state; *)
 		if end_game state then List.rev state.finished_hands
 		else 
 			let new_state = 
@@ -271,84 +271,68 @@ let play_game state players =
 	(* HINT: try references *)
 	(* TODO: I must provide to all players info about cards in final move. And info about checked cards *)
 	and do_move state move =
-		let hand = (List.nth state.hands state.active_hand) in
-		match state.claim, move with
-		| _, New_move (_, Ace) ->  failwith "do_move: Ace cannot be a claim."
-		| None, New_move (cards, claim) | Some claim, Adding_move(cards) ->
-			let hand, table = hand_cards_to_table hand cards state.table in			
-			let hands = list_replace_nth state.hands state.active_hand hand in
-			let prev_hand_n = prev_hand_num state.active_hand state.finished_hands in
-			let prev_hand = List.nth state.hands prev_hand_n in
-			let new_state = 
-				{
-					hands = hands;
-					table = table;
-					claim = Some claim;
-					active_hand = next_hand_num state.active_hand state.finished_hands;
-					finished_hands = if is_empty prev_hand then prev_hand_n :: state.finished_hands 
-									 else state.finished_hands
-				}
-			in
-			let move_log =
-				let player = List.nth players state.active_hand in
-				sprintf "%s (%s):  " player.name (string_of_player_nature player.nature)
-				^ 
-				match move with
-				| New_move (cards, claim) -> sprintf "%d cards of rank %s" (List.length cards) (string_of_card_rank claim)
-				| Adding_move (cards) -> sprintf "%d more of rank %s" (List.length cards) (string_of_card_rank claim)
-				^
-				if is_empty prev_hand then
-					let prev_player = List.nth players prev_hand_n in
-					sprintf "\n%s (%s) has no more cards. HE FINISHED.\n\n" 
-							prev_player.name 
-							(string_of_player_nature prev_player.nature)
-				else ""
-			in new_state, move_log
+		let hand = ref (List.nth state.hands state.active_hand) in
+		let prev_hand_n = prev_hand_num state.active_hand state.finished_hands in
+		let prev_hand = ref (List.nth state.hands prev_hand_n) in
 		
-		| Some claim, Check -> 
-			let check_passed = check_cards claim (List.hd state.table) in
+		let player = List.nth players state.active_hand in
+		let prev_player = List.nth players prev_hand_n in
+		
+		let new_state = {state with table = state.table} in
+		let move_log = ref (sprintf "%s (%s):  " player.name (string_of_player_nature player.nature)) in
+		
+		(
+			match state.claim, move with
+			| _, New_move (_, Ace) ->  failwith "do_move: Ace cannot be a claim."
+			| None, New_move (cards, claim) | Some claim, Adding_move(cards) ->
+				let hnd, tbl = hand_cards_to_table !hand cards new_state.table in
+				hand := hnd; 
+				new_state.table <- tbl;
+				new_state.hands <- list_replace_nth new_state.hands new_state.active_hand !hand;
+				new_state.claim <- Some claim ;
+				new_state.active_hand <- next_hand_num state.active_hand state.finished_hands;
+				
+				move_log := !move_log ^
+					(
+						match move with
+						| New_move (cards, claim) -> sprintf "%d cards of rank %s" (List.length cards) (string_of_card_rank claim)
+						| Adding_move (cards) -> sprintf "%d more of rank %s" (List.length cards) (string_of_card_rank claim)
+					)
 			
-			let prev_hand_n = prev_hand_num state.active_hand state.finished_hands in
-			let prev_hand = List.nth state.hands prev_hand_n in
-			let prev_hand = if check_passed then prev_hand else table_to_hand state.table prev_hand in
-			let new_state =
-				if check_passed then
-					{state with hands = list_replace_nth state.hands state.active_hand (table_to_hand state.table hand);
-								active_hand = next_hand_num state.active_hand state.finished_hands;
-								table = [];
-								finished_hands = if is_empty prev_hand then prev_hand_n :: state.finished_hands 
-												 else state.finished_hands;
-								claim = None}
+			| Some claim, Check -> 
+				let check_passed = check_cards claim (List.hd state.table) in
+				if check_passed then 
+				(
+					new_state.hands <- list_replace_nth state.hands state.active_hand (table_to_hand state.table !hand);
+					new_state.active_hand <- next_hand_num state.active_hand state.finished_hands;
+				)
 				else 
-					{state with hands = list_replace_nth state.hands prev_hand_n prev_hand;
-								table = [];
-								finished_hands = if is_empty prev_hand then prev_hand_n :: state.finished_hands 
-												 else state.finished_hands;
-								claim = None}
-			in
-			let move_log =
-				let player = List.nth players state.active_hand in
-				let prev_player = List.nth players prev_hand_n in
-				sprintf "%s (%s) checks cards of %s (%s) \n" 
-						player.name (string_of_player_nature player.nature)  
-						prev_player.name (string_of_player_nature prev_player.nature) 
-				^ 
-				sprintf "Cards: %s   Claim: %s. \n%s (%s) said %s. \n%s takes table.\n\n" 
-						(string_of_card_list (List.hd state.table))
-						(string_of_card_rank claim)											
-						prev_player.name 
-						(string_of_player_nature prev_player.nature)  
-						(if check_passed then "truth" else "a lie")
-						(if check_passed then player.name else prev_player.name)
-				^
-				if is_empty prev_hand then
-					let prev_player = List.nth players prev_hand_n in
-					sprintf "%s (%s) has no more cards. HE FINISHED.\n\n" 
+				(
+					prev_hand := table_to_hand state.table !prev_hand;
+					new_state.hands <- list_replace_nth state.hands prev_hand_n !prev_hand
+				);
+				new_state.table <- [];
+				new_state.claim <- None;
+				
+				move_log := !move_log ^
+					sprintf "Check \nCards: %s   Claim: %s. \n%s (%s) said %s. \n%s takes table.\n\n" 
+							(string_of_card_list (List.hd state.table))
+							(string_of_card_rank claim)											
 							prev_player.name 
-							(string_of_player_nature prev_player.nature)
-				else ""
-			in new_state, move_log	
-		| _,_ -> failwith "do_move: Invalid move"
+							(string_of_player_nature prev_player.nature)  
+							(if check_passed then "truth" else "a lie")
+							(if check_passed then player.name else prev_player.name)
+
+			| _,_ -> failwith "do_move: Invalid move"
+		); 
+		if is_empty !prev_hand then
+		(
+			new_state.finished_hands <-  prev_hand_n :: state.finished_hands;
+			move_log := !move_log ^ sprintf "\n%s (%s) has no more cards. HE FINISHED.\n\n" 
+											prev_player.name 
+											(string_of_player_nature prev_player.nature);
+		);
+		new_state, !move_log
 		
 		and is_empty = function [] -> true | _ -> false
 		and check_cards claim = List.for_all (fun (rank, suit) -> rank = claim) 
